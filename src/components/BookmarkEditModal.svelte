@@ -129,6 +129,17 @@
     })
   })
 
+  // 图标默认策略：未选择任何图标时预选 Favicon.im；
+  // 已选 Favicon.im 时随 URL 更新；用户改选其他候选后不再覆盖。
+  function applyDefaultFaviconIm(currentCandidates: IconCandidate[]) {
+    const isUnset = !form.icon.trim() && !form.icon_source
+    if (!isUnset && form.icon_source !== 'favicon_im') return
+    const faviconCandidate = currentCandidates.find((item) => item.source === 'favicon_im')
+    if (!faviconCandidate || form.icon === faviconCandidate.url) return
+    form.icon = faviconCandidate.url
+    form.icon_source = 'favicon_im'
+  }
+
   // 输入 URL 后实时生成候选。
   // 原 `$:` 以整个 form 为依赖（legacy 对象粒度）：任一字段写入都会重跑并清空 candidateError；
   // 逐个读取字段保留这一粒度，而不是只在 url / title 变化时重跑。
@@ -138,8 +149,10 @@
     const url = form.url.trim()
     const title = form.title.trim()
     untrack(() => {
-      candidates = getIconCandidates(url, title)
+      const nextCandidates = getIconCandidates(url, title)
+      candidates = nextCandidates
       candidateError = ''
+      applyDefaultFaviconIm(nextCandidates)
     })
   })
 
