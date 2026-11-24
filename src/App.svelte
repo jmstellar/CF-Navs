@@ -17,6 +17,7 @@
   import { api } from './lib/api'
   import { clearCachedAdminData } from './lib/adminDataCache'
   import { clearCachedPublicData } from './lib/publicDataCache'
+  import type { BookmarkFormValue } from './lib/adminTypes'
   import { toastStore } from './lib/toast'
   import { createAuthController, createAuthViewIntent } from './lib/appAuthController'
   import {
@@ -159,6 +160,8 @@
     onChange: (next) => {
       booting = next.booting
       recoverActive = next.recoverActive
+      // 一键收藏参数在启动完成（含私密站点登录框就绪）后消费一次。
+      if (!next.booting && !next.recoverActive && pendingQuickAdd) void consumeQuickAdd()
       // 只在控制器真正换了对象时赋值：legacy 模式下对象的同引用赋值也会触发依赖，否则 booting 变化会连带
       // 重跑 installView 与 Install 分包加载。runes 下 $state.raw 的同引用赋值本就是空操作，守卫保留为显式意图。
       if (installState !== next.installState) installState = next.installState
@@ -436,7 +439,58 @@
     resetSettings: settingsController.reset,
   })
 
+  // 书签栏一键收藏：bookmarklet 打开 ?quickadd=<url>&title=<标题>&autosave=1。
+  // 启动完成或登录成功后自动消费：打开预填好的新增弹窗（autosave 时紧接着自动提交）。
+  // 未登录时保留 pending，登录框提交成功后由下方的 effect 重新触发。
+  let pendingQuickAdd: { url: string; title: string; autosave: boolean } | null = null
+
+  function readQuickAddParams(): { url: string; title: string; autosave: boolean } | null {
+    if (typeof window === 'undefined') return null
+    const params = new URLSearchParams(window.location.search)
+    const url = params.get('quickadd')
+    if (!url) return null
+    return { url, title: params.get('title') ?? '', autosave: params.get('autosave') === '1' }
+  }
+
+  function clearQuickAddParams(): void {
+    if (typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    url.searchParams.delete('quickadd')
+    url.searchParams.delete('title')
+    url.searchParams.delete('autosave')
+    window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash)
+  }
+
+  function quickAddFaviconIm(target: string): string {
+    try {
+      const { hostname } = new URL(target)
+      return hostname ? `https://favicon.im/${hostname.replace(/^www\./, '')}?larger=true` : ''
+    } catch {
+      return ''
+    }
+  }
+
+  async function consumeQuickAdd(): Promise<void> {
+    const item = pendingQuickAdd
+    if (!item || !isLoggedIn()) return
+    pendingQuickAdd = null
+    clearQuickAddParams()
+    await bookmarkController.openCreate(undefined, item.url, item.title)
+    if (!item.autosave) return
+    const draft = bookmarkController.getState().active
+    if (!draft || draft.url !== item.url) return
+    const icon = quickAddFaviconIm(item.url)
+    await bookmarkController.submit({
+      ...draft,
+      title: draft.title?.trim() || item.url,
+      icon,
+      icon_source: icon ? 'favicon_im' : '',
+      is_private: false,
+    } as BookmarkFormValue)
+  }
+
   onMount(() => {
+    pendingQuickAdd = readQuickAddParams()
     preferredThemeMode = readPreferredThemeMode()
     customScriptController = createCustomScriptController(createBrowserCustomScriptHost())
 
@@ -446,11 +500,21 @@
     })
 
     // 直达 /recover 时只进入找回流程，不继续启动，也不安装焦点刷新。
-    if (!boot.start()) return
+    if (!boot.start()) {
+      pendingQuickAdd = null
+      return
+    }
     // 切回已打开的标签页时按会话状态刷新（Issue #25 跨标签页设置同步 / Issue #29
     // 登录态保留私密视图）：登录态走登录态聚合刷新，未登录走公开刷新。
     stopPublicDataFocusRefresh = installPublicDataFocusRefresh(() => refreshVisibleData())
   })
+
+  // 登录框提交：登录成功（私密站点从登录框进入）后接着消费一键收藏参数。
+  async function handleLoginSubmit(payload: { username: string; password: string }): Promise<void> {
+    await authController.login(payload)
+    if (!isLoggedIn()) return
+    if (pendingQuickAdd) void consumeQuickAdd()
+  }
 
   onDestroy(() => {
     bookmarkController.destroy()
@@ -584,7 +648,7 @@
         open={loginModalOpen}
         loading={$authStore.loading}
         error={$authStore.error ?? ''}
-        onSubmit={authController.login}
+        onSubmit={handleLoginSubmit}
         onCancel={authController.closeLogin}
         onForgotPassword={authController.forgotPassword}
       />

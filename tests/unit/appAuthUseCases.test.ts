@@ -620,7 +620,9 @@ describe('app auth controller', () => {
   it('App wires the auth handlers through the controller and forwards the shared ones', () => {
     const app = readFileSync('src/App.svelte', 'utf8')
     expect(app).toContain('createAuthController(')
-    expect(app).toContain('onSubmit={authController.login}')
+    expect(app).toContain('onSubmit={handleLoginSubmit}')
+    // 登录框提交包装函数仍必须经由控制器完成真正的登录。
+    expect(app).toContain('await authController.login(payload)')
     expect(app).toContain('onCancel={authController.closeLogin}')
     expect(app).toContain('onForgotPassword={authController.forgotPassword}')
     expect(app).toContain('onSwitchToAdmin={authController.switchToAdmin}')

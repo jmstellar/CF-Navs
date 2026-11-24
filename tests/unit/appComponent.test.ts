@@ -519,7 +519,8 @@ describe('App boot splash and view switching', () => {
     expect(login.open).toBe(false)
     expect(login.loading).toBe(false)
     expect(login.error).toBe('')
-    expect(login.onSubmit).toBe(h.auth.ctrl.login)
+    // 登录提交经 handleLoginSubmit 包装（登录成功后消费一键收藏参数），转发守卫在 appAuthUseCases 源码断言。
+    expect(String(login.onSubmit)).toContain('authController.login')
     expect(login.onCancel).toBe(h.auth.ctrl.closeLogin)
     expect(login.onForgotPassword).toBe(h.auth.ctrl.forgotPassword)
     h.boot.deps.setLoginModalOpen(true)
